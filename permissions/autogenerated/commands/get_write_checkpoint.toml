@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-get-write-checkpoint"
+description = "Enables the get_write_checkpoint command without any pre-configured scope."
+commands.allow = ["get_write_checkpoint"]
+
+[[permission]]
+identifier = "deny-get-write-checkpoint"
+description = "Denies the get_write_checkpoint command without any pre-configured scope."
+commands.deny = ["get_write_checkpoint"]

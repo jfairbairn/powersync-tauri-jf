@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-get-crud-batch"
+description = "Enables the get_crud_batch command without any pre-configured scope."
+commands.allow = ["get_crud_batch"]
+
+[[permission]]
+identifier = "deny-get-crud-batch"
+description = "Denies the get_crud_batch command without any pre-configured scope."
+commands.deny = ["get_crud_batch"]

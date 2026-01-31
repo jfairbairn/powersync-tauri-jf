@@ -1,0 +1,23 @@
+[default]
+description = "Default permissions for the PowerSync plugin"
+permissions = [
+    # Database operations
+    "allow-open",
+    "allow-close",
+    "allow-execute",
+    "allow-execute-batch",
+    "allow-get-all",
+    "allow-get-optional",
+    "allow-begin-transaction",
+    "allow-commit-transaction",
+    "allow-rollback-transaction",
+    # PowerSync extension operations
+    "allow-get-powersync-version",
+    "allow-is-powersync-loaded",
+    "allow-replace-schema",
+    "allow-powersync-control",
+    "allow-get-crud-batch",
+    "allow-remove-crud",
+    "allow-has-pending-crud",
+    "allow-get-write-checkpoint",
+]

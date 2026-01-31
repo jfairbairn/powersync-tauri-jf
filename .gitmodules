@@ -1,0 +1,6 @@
+[submodule "deps/powersync-sqlite-core"]
+	path = deps/powersync-sqlite-core
+	url = https://github.com/powersync-ja/powersync-sqlite-core.git
+[submodule "deps/self-host-demo"]
+	path = deps/self-host-demo
+	url = https://github.com/powersync-ja/self-host-demo.git
