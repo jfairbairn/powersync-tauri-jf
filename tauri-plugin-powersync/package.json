@@ -1,0 +1,42 @@
+{
+  "name": "@powersync/tauri",
+  "version": "0.1.0",
+  "description": "PowerSync Tauri plugin with native SQLite",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "guest-js"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:tauri": "cd test-app && npm run test",
+    "test:tauri:dev": "cd test-app && npm run tauri dev",
+    "format": "prettier --write guest-js/",
+    "lint": "eslint guest-js/"
+  },
+  "dependencies": {
+    "@powersync/common": "^1.0.0",
+    "@tauri-apps/api": "^2.0.0"
+  },
+  "devDependencies": {
+    "@powersync/web": "^1.32.0",
+    "@types/node": "^22.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0"
+  },
+  "peerDependencies": {
+    "@tauri-apps/api": "^2.0.0"
+  }
+}
