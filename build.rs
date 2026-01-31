@@ -33,19 +33,59 @@ fn build_powersync_extension() {
     use std::path::PathBuf;
     use std::process::Command;
 
-    // Get the path to the powersync-sqlite-core submodule
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let core_dir = manifest_dir.join("deps/powersync-sqlite-core");
-
-    // Check if the submodule exists
-    if !core_dir.exists() {
-        println!("cargo:warning=PowerSync extension submodule not found at {:?}", core_dir);
-        println!("cargo:warning=Run: git submodule add https://github.com/powersync-ja/powersync-sqlite-core.git deps/powersync-sqlite-core");
-        return;
-    }
-
-    // Get target directory
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    // Check for submodule first (development/submodule setup)
+    let submodule_dir = manifest_dir.join("deps/powersync-sqlite-core");
+    let cloned_dir = out_dir.join("powersync-sqlite-core");
+
+    // Determine which source directory to use
+    let core_dir = if submodule_dir.join("Cargo.toml").exists() {
+        // Use existing submodule
+        submodule_dir
+    } else {
+        // Clone to OUT_DIR if not already done (supports git/crates.io installation)
+        if !cloned_dir.join("Cargo.toml").exists() {
+            println!("cargo:warning=PowerSync extension source not found, cloning from GitHub...");
+
+            // Remove empty/partial directory if it exists
+            if cloned_dir.exists() {
+                std::fs::remove_dir_all(&cloned_dir).ok();
+            }
+
+            let status = Command::new("git")
+                .args([
+                    "clone",
+                    "--depth",
+                    "1",
+                    "https://github.com/powersync-ja/powersync-sqlite-core.git",
+                    cloned_dir.to_str().unwrap(),
+                ])
+                .status();
+
+            match status {
+                Ok(s) if s.success() => {
+                    println!("cargo:warning=Successfully cloned powersync-sqlite-core");
+                }
+                Ok(s) => {
+                    println!(
+                        "cargo:warning=Failed to clone powersync-sqlite-core: exit code {:?}",
+                        s.code()
+                    );
+                    return;
+                }
+                Err(e) => {
+                    println!("cargo:warning=Failed to run git clone: {}", e);
+                    println!("cargo:warning=Make sure git is installed and accessible");
+                    return;
+                }
+            }
+        }
+        cloned_dir
+    };
+
+    // Get target directory for extension build
     let target_dir = out_dir.join("powersync-ext");
     std::fs::create_dir_all(&target_dir).ok();
 

@@ -136,7 +136,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * Open the database connection
    */
   async open(): Promise<void> {
-    await invoke('plugin:powersync|open', { name: this.name });
+    await invoke('plugin:powersync-jf|open', { name: this.name });
   }
 
   /**
@@ -145,14 +145,14 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
-    await invoke('plugin:powersync|close', { name: this.name });
+    await invoke('plugin:powersync-jf|close', { name: this.name });
   }
 
   /**
    * Execute a SQL statement
    */
   async execute(sql: string, params?: any[]): Promise<QueryResult> {
-    const result = await invoke<ExecuteResult>('plugin:powersync|execute', {
+    const result = await invoke<ExecuteResult>('plugin:powersync-jf|execute', {
       name: this.name,
       sql,
       params: params ?? [],
@@ -183,7 +183,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * Execute a SQL statement and return raw results (array of arrays)
    */
   async executeRaw(sql: string, params?: any[]): Promise<any[][]> {
-    const result = await invoke<TauriQueryResult>('plugin:powersync|get_all', {
+    const result = await invoke<TauriQueryResult>('plugin:powersync-jf|get_all', {
       name: this.name,
       sql,
       params: params ?? [],
@@ -197,7 +197,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * Execute a read-only query and return all results
    */
   async getAll<T>(sql: string, params?: any[]): Promise<T[]> {
-    const result = await invoke<TauriQueryResult>('plugin:powersync|get_all', {
+    const result = await invoke<TauriQueryResult>('plugin:powersync-jf|get_all', {
       name: this.name,
       sql,
       params: params ?? [],
@@ -210,7 +210,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * Execute a read-only query and return a single optional result
    */
   async getOptional<T>(sql: string, params?: any[]): Promise<T | null> {
-    const result = await invoke<Record<string, unknown> | null>('plugin:powersync|get_optional', {
+    const result = await invoke<Record<string, unknown> | null>('plugin:powersync-jf|get_optional', {
       name: this.name,
       sql,
       params: params ?? [],
@@ -234,7 +234,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * Execute a batch of SQL statements with the same SQL but different parameters
    */
   async executeBatch(sql: string, paramsBatch?: any[][]): Promise<QueryResult> {
-    const result = await invoke<ExecuteResult>('plugin:powersync|execute_batch', {
+    const result = await invoke<ExecuteResult>('plugin:powersync-jf|execute_batch', {
       name: this.name,
       sql,
       paramsBatch: paramsBatch ?? [],
@@ -285,7 +285,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
     callback: (tx: Transaction) => Promise<T>,
     isWrite: boolean
   ): Promise<T> {
-    const txId = await invoke<string>('plugin:powersync|begin_transaction', {
+    const txId = await invoke<string>('plugin:powersync-jf|begin_transaction', {
       name: this.name,
       isWrite,
     });
@@ -298,7 +298,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
 
     const tx: Transaction = {
       execute: async (sql: string, params?: any[]): Promise<QueryResult> => {
-        const result = await invoke<ExecuteResult>('plugin:powersync|execute', {
+        const result = await invoke<ExecuteResult>('plugin:powersync-jf|execute', {
           name: self.name,
           sql,
           params: params ?? [],
@@ -326,7 +326,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
       },
 
       executeRaw: async (sql: string, params?: any[]): Promise<any[][]> => {
-        const result = await invoke<TauriQueryResult>('plugin:powersync|get_all', {
+        const result = await invoke<TauriQueryResult>('plugin:powersync-jf|get_all', {
           name: self.name,
           sql,
           params: params ?? [],
@@ -335,7 +335,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
       },
 
       getAll: async <R>(sql: string, params?: any[]): Promise<R[]> => {
-        const result = await invoke<TauriQueryResult>('plugin:powersync|get_all', {
+        const result = await invoke<TauriQueryResult>('plugin:powersync-jf|get_all', {
           name: self.name,
           sql,
           params: params ?? [],
@@ -345,7 +345,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
 
       getOptional: async <R>(sql: string, params?: any[]): Promise<R | null> => {
         const result = await invoke<Record<string, unknown> | null>(
-          'plugin:powersync|get_optional',
+          'plugin:powersync-jf|get_optional',
           {
             name: self.name,
             sql,
@@ -365,7 +365,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
 
       rollback: async (): Promise<QueryResult> => {
         finalized = true;
-        await invoke('plugin:powersync|rollback_transaction', {
+        await invoke('plugin:powersync-jf|rollback_transaction', {
           name: self.name,
           txId,
         });
@@ -374,7 +374,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
 
       commit: async (): Promise<QueryResult> => {
         finalized = true;
-        await invoke('plugin:powersync|commit_transaction', {
+        await invoke('plugin:powersync-jf|commit_transaction', {
           name: self.name,
           txId,
         });
@@ -391,7 +391,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
 
       // Only commit if not already finalized by the callback
       if (!finalized) {
-        await invoke('plugin:powersync|commit_transaction', {
+        await invoke('plugin:powersync-jf|commit_transaction', {
           name: this.name,
           txId,
         });
@@ -407,7 +407,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
       // Only rollback if not already finalized
       if (!finalized) {
         try {
-          await invoke('plugin:powersync|rollback_transaction', {
+          await invoke('plugin:powersync-jf|rollback_transaction', {
             name: this.name,
             txId,
           });
@@ -464,7 +464,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * Check if the PowerSync extension is loaded
    */
   async isPowerSyncLoaded(): Promise<boolean> {
-    return invoke<boolean>('plugin:powersync|is_powersync_loaded', {
+    return invoke<boolean>('plugin:powersync-jf|is_powersync_loaded', {
       name: this.name,
     });
   }
@@ -473,7 +473,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * Get the PowerSync extension version
    */
   async getPowerSyncVersion(): Promise<string> {
-    return invoke<string>('plugin:powersync|get_powersync_version', {
+    return invoke<string>('plugin:powersync-jf|get_powersync_version', {
       name: this.name,
     });
   }
@@ -483,7 +483,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * @param schemaJson JSON-encoded schema definition
    */
   async replaceSchema(schemaJson: string): Promise<void> {
-    await invoke('plugin:powersync|replace_schema', {
+    await invoke('plugin:powersync-jf|replace_schema', {
       name: this.name,
       schemaJson,
     });
@@ -496,7 +496,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * @returns JSON-encoded result
    */
   async powerSyncControl(op: string, payload: string): Promise<string> {
-    return invoke<string>('plugin:powersync|powersync_control', {
+    return invoke<string>('plugin:powersync-jf|powersync_control', {
       name: this.name,
       op,
       payload,
@@ -508,7 +508,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * @param limit Maximum number of entries to return (default: 100)
    */
   async getCrudBatch(limit?: number): Promise<CrudEntry[]> {
-    return invoke<CrudEntry[]>('plugin:powersync|get_crud_batch', {
+    return invoke<CrudEntry[]>('plugin:powersync-jf|get_crud_batch', {
       name: this.name,
       limit,
     });
@@ -519,7 +519,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * @param crudId Maximum CRUD entry ID to remove
    */
   async removeCrud(crudId: number): Promise<void> {
-    await invoke('plugin:powersync|remove_crud', {
+    await invoke('plugin:powersync-jf|remove_crud', {
       name: this.name,
       crudId,
     });
@@ -529,7 +529,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * Check if there are pending CRUD entries
    */
   async hasPendingCrud(): Promise<boolean> {
-    return invoke<boolean>('plugin:powersync|has_pending_crud', {
+    return invoke<boolean>('plugin:powersync-jf|has_pending_crud', {
       name: this.name,
     });
   }
@@ -538,7 +538,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
    * Get the current write checkpoint
    */
   async getWriteCheckpoint(): Promise<string | null> {
-    return invoke<string | null>('plugin:powersync|get_write_checkpoint', {
+    return invoke<string | null>('plugin:powersync-jf|get_write_checkpoint', {
       name: this.name,
     });
   }

@@ -1,24 +1,43 @@
-# tauri-plugin-powersync
+# tauri-plugin-powersync-jf
 
-A Tauri 2.0 plugin that provides SQLite database functionality using native Rust SQLite, designed for use with PowerSync.
+A Tauri 2.0 plugin that provides PowerSync with native SQLite, designed as a drop-in replacement for `@powersync/web` that eliminates WASM CPU overhead.
 
 ## Why This Plugin?
 
-When using PowerSync with Tauri on macOS, WebKit's SQLite implementation via IndexedDB + WASM can cause high CPU usage. This plugin bypasses that by using native Rust SQLite (rusqlite), providing better performance and reliability.
+WebKit-based apps (Tauri on macOS/iOS, etc.) suffer from severe CPU usage when running SQLite via WASM. The standard `@powersync/web` package uses WASM SQLite which causes the CPU to spin at 100%+ even when idle.
+
+This plugin solves that by running SQLite natively via Rust (rusqlite), providing the same PowerSync API but without the WASM overhead.
 
 ## Installation
 
-### Rust (src-tauri/Cargo.toml)
+### From Registries (Recommended)
+
+**Rust** (src-tauri/Cargo.toml):
 
 ```toml
 [dependencies]
-tauri-plugin-powersync = { git = "https://github.com/your-repo/tauri-plugin-powersync" }
+tauri-plugin-powersync-jf = "0.1.0"
 ```
 
-### JavaScript
+**JavaScript**:
 
 ```bash
-npm install @powersync/tauri
+npm add @jfairbairn/tauri-plugin-powersync-jf
+```
+
+### From Git (Development/Beta)
+
+**Rust** (src-tauri/Cargo.toml):
+
+```toml
+[dependencies]
+tauri-plugin-powersync-jf = { git = "https://github.com/jfairbairn/powersync-tauri" }
+```
+
+**JavaScript**:
+
+```bash
+npm add github:jfairbairn/powersync-tauri
 ```
 
 ### Register the Plugin (src-tauri/src/lib.rs)
@@ -26,7 +45,7 @@ npm install @powersync/tauri
 ```rust
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_powersync::init())
+        .plugin(tauri_plugin_powersync_jf::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -37,17 +56,45 @@ pub fn run() {
 ```json
 {
   "permissions": [
-    "powersync:default"
+    "powersync-jf:default"
   ]
 }
 ```
 
 ## Usage
 
-### Simple Database Operations
+### Full Sync (Recommended)
 
 ```typescript
-import { TauriPowerSyncDatabase } from '@powersync/tauri';
+import { PowerSyncDatabase } from '@jfairbairn/tauri-plugin-powersync-jf';
+import { Schema, Table, column } from '@powersync/common';
+
+const schema = new Schema({
+  todos: new Table({
+    description: column.text,
+    completed: column.integer,
+  }),
+});
+
+const db = new PowerSyncDatabase({
+  database: 'myapp',
+  schema,
+});
+
+await db.init();
+
+// Connect to PowerSync service
+await db.connect(myBackendConnector);
+
+// Use like a normal database - changes sync automatically
+await db.execute('INSERT INTO todos (id, description) VALUES (uuid(), ?)', ['Buy milk']);
+const todos = await db.getAll('SELECT * FROM todos');
+```
+
+### Simple Database (No Sync)
+
+```typescript
+import { TauriPowerSyncDatabase } from '@jfairbairn/tauri-plugin-powersync-jf';
 
 const db = new TauriPowerSyncDatabase({ database: 'myapp' });
 await db.init();
@@ -88,7 +135,7 @@ await db.close();
 For advanced use cases or integration with PowerSync's sync functionality:
 
 ```typescript
-import { TauriDBAdapter } from '@powersync/tauri';
+import { TauriDBAdapter } from '@jfairbairn/tauri-plugin-powersync-jf';
 
 const adapter = new TauriDBAdapter('myapp');
 await adapter.open();
@@ -101,9 +148,27 @@ await adapter.close();
 
 ## API Reference
 
+### PowerSyncDatabase
+
+Full sync-enabled database - drop-in replacement for `@powersync/web`.
+
+| Method | Description |
+|--------|-------------|
+| `init()` | Initialize the database connection |
+| `connect(connector)` | Connect to PowerSync service and start syncing |
+| `disconnect()` | Disconnect from sync service |
+| `close()` | Close the database connection |
+| `execute(sql, params?)` | Execute a SQL statement |
+| `getAll<T>(sql, params?)` | Query all matching rows |
+| `getOptional<T>(sql, params?)` | Query single row or null |
+| `get<T>(sql, params?)` | Query single row (throws if not found) |
+| `watch(sql, params?, options?)` | Reactive query that updates on changes |
+| `writeTransaction(callback)` | Run callback in write transaction |
+| `readTransaction(callback)` | Run callback in read transaction |
+
 ### TauriPowerSyncDatabase
 
-A simplified wrapper for SQLite operations.
+A simplified wrapper for SQLite operations (no sync).
 
 | Method | Description |
 |--------|-------------|
@@ -125,24 +190,25 @@ Full DBAdapter implementation compatible with @powersync/common.
 
 Implements: `DBAdapter` interface from `@powersync/common`
 
-## Current Limitations
-
-1. **PowerSync Extension**: The PowerSync SQLite extension (powersync-sqlite-core) is not yet integrated. This means sync-specific SQL functions like `powersync_replace_schema()` are not available.
-
-2. **Sync Functionality**: Full PowerSync sync requires additional implementation. The current version provides local SQLite operations only.
-
 ## Development
 
 ```bash
-# Build Rust plugin
+# Build Rust plugin (also builds PowerSync extension)
 cargo build
 
 # Build TypeScript
 npm run build
 
+# Run test app
+npm run test:tauri:dev
+
 # Run tests
 npm test
 ```
+
+## How It Works
+
+The plugin automatically fetches the [powersync-sqlite-core](https://github.com/powersync-ja/powersync-sqlite-core) source during build if it's not present. This enables installation from both git and package registries without requiring manual submodule initialization.
 
 ## License
 

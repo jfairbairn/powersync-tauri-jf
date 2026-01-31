@@ -1,11 +1,12 @@
 [package]
-name = "tauri-plugin-powersync"
+name = "tauri-plugin-powersync-jf"
 version = "0.1.0"
 edition = "2021"
 description = "Tauri plugin providing PowerSync with native SQLite"
 license = "MIT"
-repository = "https://github.com/powersync-ja/powersync-tauri"
-links = "tauri-plugin-powersync"
+repository = "https://github.com/jfairbairn/powersync-tauri"
+links = "tauri-plugin-powersync-jf"
+exclude = ["deps/", "test-app/"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -4,11 +4,11 @@
 
 WebKit-based apps (Tauri on macOS/iOS, Electron on macOS, etc.) suffer from severe CPU usage when running SQLite via WASM. The standard `@powersync/web` package uses WASM SQLite which causes the CPU to spin at 100%+ even when idle.
 
-This plugin solves that by running SQLite natively via Rust (rusqlite), providing the same PowerSync API but without the WASM overhead. **It's a drop-in replacement for `@powersync/web`** - you change your import from `@powersync/web` to `@powersync/tauri` and everything else stays the same.
+This plugin solves that by running SQLite natively via Rust (rusqlite), providing the same PowerSync API but without the WASM overhead. **It's a drop-in replacement for `@powersync/web`** - you change your import from `@powersync/web` to `@jfairbairn/tauri-plugin-powersync-jf` and everything else stays the same.
 
 ## Project Overview
 
-This is `tauri-plugin-powersync`, a Tauri 2.0 plugin that provides SQLite database functionality using native Rust SQLite (rusqlite) with full PowerSync sync support.
+This is `tauri-plugin-powersync-jf`, a Tauri 2.0 plugin that provides SQLite database functionality using native Rust SQLite (rusqlite) with full PowerSync sync support.
 
 ## Status
 
@@ -86,7 +86,7 @@ cargo fmt && npm run format
 ### Full Sync (Recommended)
 
 ```typescript
-import { PowerSyncDatabase } from '@powersync/tauri';
+import { PowerSyncDatabase } from '@jfairbairn/tauri-plugin-powersync-jf';
 import { Schema, Table, column } from '@powersync/common';
 
 const schema = new Schema({
@@ -114,7 +114,7 @@ const todos = await db.getAll('SELECT * FROM todos');
 ### Simple Database (No Sync)
 
 ```typescript
-import { TauriPowerSyncDatabase } from '@powersync/tauri';
+import { TauriPowerSyncDatabase } from '@jfairbairn/tauri-plugin-powersync-jf';
 
 const db = new TauriPowerSyncDatabase({ database: 'myapp' });
 await db.init();
@@ -130,18 +130,18 @@ const todos = await db.getAll('SELECT * FROM todos');
 1. Add to your app's `src-tauri/Cargo.toml`:
    ```toml
    [dependencies]
-   tauri-plugin-powersync = { path = ".." }
+   tauri-plugin-powersync-jf = { path = ".." }
    ```
 
 2. Register in `src-tauri/src/lib.rs`:
    ```rust
    tauri::Builder::default()
-       .plugin(tauri_plugin_powersync::init())
+       .plugin(tauri_plugin_powersync_jf::init())
    ```
 
 3. Add permissions to `src-tauri/capabilities/default.json`:
    ```json
-   { "permissions": ["powersync:default"] }
+   { "permissions": ["powersync-jf:default"] }
    ```
 
 4. Bundle the PowerSync extension in your app's resources (built automatically during `cargo build`)

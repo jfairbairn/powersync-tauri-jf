@@ -34,7 +34,7 @@ Default permissions for the PowerSync plugin
 <tr>
 <td>
 
-`powersync:allow-begin-transaction`
+`powersync-jf:allow-begin-transaction`
 
 </td>
 <td>
@@ -47,7 +47,7 @@ Enables the begin_transaction command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-begin-transaction`
+`powersync-jf:deny-begin-transaction`
 
 </td>
 <td>
@@ -60,7 +60,7 @@ Denies the begin_transaction command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-close`
+`powersync-jf:allow-close`
 
 </td>
 <td>
@@ -73,7 +73,7 @@ Enables the close command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-close`
+`powersync-jf:deny-close`
 
 </td>
 <td>
@@ -86,7 +86,7 @@ Denies the close command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-commit-transaction`
+`powersync-jf:allow-commit-transaction`
 
 </td>
 <td>
@@ -99,7 +99,7 @@ Enables the commit_transaction command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-commit-transaction`
+`powersync-jf:deny-commit-transaction`
 
 </td>
 <td>
@@ -112,7 +112,7 @@ Denies the commit_transaction command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-execute`
+`powersync-jf:allow-execute`
 
 </td>
 <td>
@@ -125,7 +125,7 @@ Enables the execute command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-execute`
+`powersync-jf:deny-execute`
 
 </td>
 <td>
@@ -138,7 +138,7 @@ Denies the execute command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-execute-batch`
+`powersync-jf:allow-execute-batch`
 
 </td>
 <td>
@@ -151,7 +151,7 @@ Enables the execute_batch command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-execute-batch`
+`powersync-jf:deny-execute-batch`
 
 </td>
 <td>
@@ -164,7 +164,7 @@ Denies the execute_batch command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-get-all`
+`powersync-jf:allow-get-all`
 
 </td>
 <td>
@@ -177,7 +177,7 @@ Enables the get_all command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-get-all`
+`powersync-jf:deny-get-all`
 
 </td>
 <td>
@@ -190,7 +190,7 @@ Denies the get_all command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-get-crud-batch`
+`powersync-jf:allow-get-crud-batch`
 
 </td>
 <td>
@@ -203,7 +203,7 @@ Enables the get_crud_batch command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-get-crud-batch`
+`powersync-jf:deny-get-crud-batch`
 
 </td>
 <td>
@@ -216,7 +216,7 @@ Denies the get_crud_batch command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-get-optional`
+`powersync-jf:allow-get-optional`
 
 </td>
 <td>
@@ -229,7 +229,7 @@ Enables the get_optional command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-get-optional`
+`powersync-jf:deny-get-optional`
 
 </td>
 <td>
@@ -242,7 +242,7 @@ Denies the get_optional command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-get-powersync-version`
+`powersync-jf:allow-get-powersync-version`
 
 </td>
 <td>
@@ -255,7 +255,7 @@ Enables the get_powersync_version command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-get-powersync-version`
+`powersync-jf:deny-get-powersync-version`
 
 </td>
 <td>
@@ -268,7 +268,7 @@ Denies the get_powersync_version command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-get-write-checkpoint`
+`powersync-jf:allow-get-write-checkpoint`
 
 </td>
 <td>
@@ -281,7 +281,7 @@ Enables the get_write_checkpoint command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-get-write-checkpoint`
+`powersync-jf:deny-get-write-checkpoint`
 
 </td>
 <td>
@@ -294,7 +294,7 @@ Denies the get_write_checkpoint command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-has-pending-crud`
+`powersync-jf:allow-has-pending-crud`
 
 </td>
 <td>
@@ -307,7 +307,7 @@ Enables the has_pending_crud command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-has-pending-crud`
+`powersync-jf:deny-has-pending-crud`
 
 </td>
 <td>
@@ -320,7 +320,7 @@ Denies the has_pending_crud command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-is-powersync-loaded`
+`powersync-jf:allow-is-powersync-loaded`
 
 </td>
 <td>
@@ -333,7 +333,7 @@ Enables the is_powersync_loaded command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-is-powersync-loaded`
+`powersync-jf:deny-is-powersync-loaded`
 
 </td>
 <td>
@@ -346,7 +346,7 @@ Denies the is_powersync_loaded command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-open`
+`powersync-jf:allow-open`
 
 </td>
 <td>
@@ -359,7 +359,7 @@ Enables the open command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-open`
+`powersync-jf:deny-open`
 
 </td>
 <td>
@@ -372,7 +372,7 @@ Denies the open command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-powersync-control`
+`powersync-jf:allow-powersync-control`
 
 </td>
 <td>
@@ -385,7 +385,7 @@ Enables the powersync_control command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-powersync-control`
+`powersync-jf:deny-powersync-control`
 
 </td>
 <td>
@@ -398,7 +398,7 @@ Denies the powersync_control command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-remove-crud`
+`powersync-jf:allow-remove-crud`
 
 </td>
 <td>
@@ -411,7 +411,7 @@ Enables the remove_crud command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-remove-crud`
+`powersync-jf:deny-remove-crud`
 
 </td>
 <td>
@@ -424,7 +424,7 @@ Denies the remove_crud command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-replace-schema`
+`powersync-jf:allow-replace-schema`
 
 </td>
 <td>
@@ -437,7 +437,7 @@ Enables the replace_schema command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-replace-schema`
+`powersync-jf:deny-replace-schema`
 
 </td>
 <td>
@@ -450,7 +450,7 @@ Denies the replace_schema command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:allow-rollback-transaction`
+`powersync-jf:allow-rollback-transaction`
 
 </td>
 <td>
@@ -463,7 +463,7 @@ Enables the rollback_transaction command without any pre-configured scope.
 <tr>
 <td>
 
-`powersync:deny-rollback-transaction`
+`powersync-jf:deny-rollback-transaction`
 
 </td>
 <td>

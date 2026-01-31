@@ -16,7 +16,7 @@ pub struct PowerSyncState(pub Mutex<DatabaseManager>);
 
 /// Initialize the PowerSync plugin
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
-    Builder::new("powersync")
+    Builder::new("powersync-jf")
         .setup(|app, _api| {
             // Get app data directory for storing databases
             let app_data_dir = app

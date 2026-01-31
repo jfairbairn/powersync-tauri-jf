@@ -5,7 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "powersync:default",
+    "powersync-jf:default",
     "http:default",
     {
       "identifier": "http:allow-fetch",
