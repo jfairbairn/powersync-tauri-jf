@@ -2,6 +2,7 @@ import {
   AbstractStreamingSyncImplementation,
   type AbstractStreamingSyncImplementationOptions,
   type LockOptions,
+  type SyncStatusOptions,
 } from '@powersync/common';
 
 /**
@@ -13,6 +14,26 @@ import {
 export class TauriStreamingSyncImplementation extends AbstractStreamingSyncImplementation {
   constructor(options: AbstractStreamingSyncImplementationOptions) {
     super(options);
+  }
+
+  /**
+   * Normalize download errors so non-Error throwables (strings, plain objects)
+   * are wrapped as proper Error instances before PowerSync's serializeError()
+   * reads .name/.message/.stack.
+   */
+  updateSyncStatus(options: SyncStatusOptions): void {
+    if (options.dataFlow?.downloadError != null) {
+      const e = options.dataFlow.downloadError;
+      if (!(e instanceof Error)) {
+        const wrapped = new Error(typeof e === 'string' ? e : JSON.stringify(e));
+        wrapped.name = 'SyncError';
+        options = {
+          ...options,
+          dataFlow: { ...options.dataFlow, downloadError: wrapped },
+        };
+      }
+    }
+    super.updateSyncStatus(options);
   }
 
   /**

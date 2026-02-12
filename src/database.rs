@@ -1,19 +1,62 @@
 use crate::error::{Error, Result};
 use crate::extension;
 use rusqlite::{params_from_iter, Connection, OpenFlags};
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-/// Represents an active transaction
+/// A SQL parameter with explicit type information.
+/// This allows proper handling of blobs vs arrays.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type", content = "value")]
+pub enum SqlParam {
+    #[serde(rename = "null")]
+    Null,
+    #[serde(rename = "bool")]
+    Bool(bool),
+    #[serde(rename = "int")]
+    Int(i64),
+    #[serde(rename = "real")]
+    Real(f64),
+    #[serde(rename = "text")]
+    Text(String),
+    #[serde(rename = "blob")]
+    Blob(Vec<u8>),
+}
+
+impl SqlParam {
+    /// Convert to a rusqlite Value
+    pub fn to_sql_value(&self) -> rusqlite::types::Value {
+        match self {
+            SqlParam::Null => rusqlite::types::Value::Null,
+            SqlParam::Bool(b) => rusqlite::types::Value::Integer(if *b { 1 } else { 0 }),
+            SqlParam::Int(i) => rusqlite::types::Value::Integer(*i),
+            SqlParam::Real(f) => rusqlite::types::Value::Real(*f),
+            SqlParam::Text(s) => rusqlite::types::Value::Text(s.clone()),
+            SqlParam::Blob(b) => rusqlite::types::Value::Blob(b.clone()),
+        }
+    }
+}
+
+/// Convert a slice of SqlParams to rusqlite Values
+fn sql_params_to_values(params: &[SqlParam]) -> Vec<rusqlite::types::Value> {
+    params.iter().map(|p| p.to_sql_value()).collect()
+}
+
+/// Represents an active transaction or savepoint
 pub struct Transaction {
     #[allow(dead_code)]
     pub id: String,
     #[allow(dead_code)]
     pub is_write: bool,
     pub completed: bool,
+    /// If true, this is a savepoint (nested transaction), not a real transaction
+    pub is_savepoint: bool,
+    /// Savepoint name (only set if is_savepoint is true)
+    pub savepoint_name: Option<String>,
 }
 
 /// A PowerSync-enabled SQLite connection
@@ -22,6 +65,8 @@ pub struct PowerSyncConnection {
     transactions: HashMap<String, Transaction>,
     db_path: PathBuf,
     powersync_loaded: bool,
+    /// Track transaction nesting depth for savepoint management
+    transaction_depth: usize,
 }
 
 impl PowerSyncConnection {
@@ -101,6 +146,7 @@ impl PowerSyncConnection {
             transactions: HashMap::new(),
             db_path,
             powersync_loaded,
+            transaction_depth: 0,
         })
     }
 
@@ -109,8 +155,27 @@ impl PowerSyncConnection {
     /// If the SQL is a SELECT statement, it will be executed as a query
     /// and the results will be returned in the `rows` field.
     /// This is needed because PowerSync extension functions use SELECT to return values.
-    pub fn execute(&mut self, sql: &str, params: &[JsonValue]) -> Result<ExecuteResult> {
-        let params = json_to_sql_params(params);
+    pub fn execute(&mut self, sql: &str, params: &[SqlParam]) -> Result<ExecuteResult> {
+        log::info!("[execute] SQL: {}", sql);
+        log::info!("[execute] Params count: {}", params.len());
+        for (i, p) in params.iter().enumerate() {
+            match p {
+                SqlParam::Text(s) => {
+                    log::info!("[execute] Param {}: Text(len={})", i, s.len());
+                    if s.len() < 200 {
+                        log::info!("[execute] Param {} value: {}", i, s);
+                    } else {
+                        log::info!("[execute] Param {} value (first 100): {}...", i, &s[..100]);
+                    }
+                },
+                SqlParam::Blob(b) => log::info!("[execute] Param {}: Blob(len={})", i, b.len()),
+                SqlParam::Int(n) => log::info!("[execute] Param {}: Int({})", i, n),
+                SqlParam::Real(n) => log::info!("[execute] Param {}: Real({})", i, n),
+                SqlParam::Bool(b) => log::info!("[execute] Param {}: Bool({})", i, b),
+                SqlParam::Null => log::info!("[execute] Param {}: Null", i),
+            }
+        }
+        let params = sql_params_to_values(params);
         let sql_upper = sql.trim_start().to_uppercase();
 
         // Check if this is a SELECT or other query that returns results
@@ -156,35 +221,50 @@ impl PowerSyncConnection {
     }
 
     /// Execute a batch of SQL statements
+    /// Uses a savepoint to allow nesting within an existing transaction.
     pub fn execute_batch(
         &mut self,
         sql: &str,
-        params_batch: &[Vec<JsonValue>],
+        params_batch: &[Vec<SqlParam>],
     ) -> Result<ExecuteResult> {
-        let tx = self.conn.transaction()?;
+        // Use savepoint instead of transaction to support nesting
+        let savepoint_name = format!("batch_{}", uuid::Uuid::new_v4().to_string().replace("-", ""));
+        self.conn.execute(&format!("SAVEPOINT {}", savepoint_name), [])?;
+
         let mut total_changes = 0i64;
         let mut last_rowid = 0i64;
 
-        for params in params_batch {
-            let params = json_to_sql_params(params);
-            let changes = tx.execute(sql, params_from_iter(params))?;
-            total_changes += changes as i64;
-            last_rowid = tx.last_insert_rowid();
+        let result = (|| {
+            for params in params_batch {
+                let params = sql_params_to_values(params);
+                let changes = self.conn.execute(sql, params_from_iter(params))?;
+                total_changes += changes as i64;
+                last_rowid = self.conn.last_insert_rowid();
+            }
+            Ok::<_, crate::error::Error>(())
+        })();
+
+        match result {
+            Ok(()) => {
+                self.conn.execute(&format!("RELEASE SAVEPOINT {}", savepoint_name), [])?;
+                Ok(ExecuteResult {
+                    changes: total_changes,
+                    last_insert_rowid: last_rowid,
+                    columns: None,
+                    rows: None,
+                })
+            }
+            Err(e) => {
+                let _ = self.conn.execute(&format!("ROLLBACK TO SAVEPOINT {}", savepoint_name), []);
+                let _ = self.conn.execute(&format!("RELEASE SAVEPOINT {}", savepoint_name), []);
+                Err(e)
+            }
         }
-
-        tx.commit()?;
-
-        Ok(ExecuteResult {
-            changes: total_changes,
-            last_insert_rowid: last_rowid,
-            columns: None,
-            rows: None,
-        })
     }
 
     /// Query and return all matching rows
-    pub fn get_all(&self, sql: &str, params: &[JsonValue]) -> Result<QueryResult> {
-        let params = json_to_sql_params(params);
+    pub fn get_all(&self, sql: &str, params: &[SqlParam]) -> Result<QueryResult> {
+        let params = sql_params_to_values(params);
         let mut stmt = self.conn.prepare(sql)?;
 
         let column_count = stmt.column_count();
@@ -207,37 +287,67 @@ impl PowerSyncConnection {
     }
 
     /// Query and return a single optional row
-    pub fn get_optional(&self, sql: &str, params: &[JsonValue]) -> Result<Option<RowResult>> {
+    pub fn get_optional(&self, sql: &str, params: &[SqlParam]) -> Result<Option<RowResult>> {
         let result = self.get_all(sql, params)?;
         Ok(result.rows.into_iter().next())
     }
 
-    /// Begin a new transaction
+    /// Begin a new transaction or savepoint if already in a transaction
     pub fn begin_transaction(&mut self, is_write: bool) -> Result<String> {
         let tx_id = Uuid::new_v4().to_string();
 
-        let sql = if is_write {
-            "BEGIN IMMEDIATE"
+        log::info!("[begin_transaction] depth={}, is_write={}, tx_id={}", self.transaction_depth, is_write, tx_id);
+
+        if self.transaction_depth > 0 {
+            // Already in a transaction, use savepoint for nesting
+            let savepoint_name = format!("sp_{}", tx_id.replace("-", ""));
+            log::info!("[begin_transaction] Creating savepoint: {}", savepoint_name);
+            self.conn.execute(&format!("SAVEPOINT {}", savepoint_name), [])?;
+
+            self.transactions.insert(
+                tx_id.clone(),
+                Transaction {
+                    id: tx_id.clone(),
+                    is_write,
+                    completed: false,
+                    is_savepoint: true,
+                    savepoint_name: Some(savepoint_name.clone()),
+                },
+            );
+            log::info!("[begin_transaction] Savepoint created: {}", savepoint_name);
         } else {
-            "BEGIN"
-        };
+            // Start a real transaction
+            let sql = if is_write {
+                "BEGIN IMMEDIATE"
+            } else {
+                "BEGIN"
+            };
 
-        self.conn.execute(sql, [])?;
+            log::info!("[begin_transaction] Starting real transaction: {}", sql);
+            self.conn.execute(sql, [])?;
 
-        self.transactions.insert(
-            tx_id.clone(),
-            Transaction {
-                id: tx_id.clone(),
-                is_write,
-                completed: false,
-            },
-        );
+            self.transactions.insert(
+                tx_id.clone(),
+                Transaction {
+                    id: tx_id.clone(),
+                    is_write,
+                    completed: false,
+                    is_savepoint: false,
+                    savepoint_name: None,
+                },
+            );
+            log::info!("[begin_transaction] Real transaction started");
+        }
 
+        self.transaction_depth += 1;
+        log::info!("[begin_transaction] New depth={}", self.transaction_depth);
         Ok(tx_id)
     }
 
-    /// Commit a transaction
+    /// Commit a transaction or release savepoint
     pub fn commit_transaction(&mut self, tx_id: &str) -> Result<()> {
+        log::info!("[commit_transaction] tx_id={}, depth={}", tx_id, self.transaction_depth);
+
         let tx = self
             .transactions
             .get_mut(tx_id)
@@ -247,28 +357,91 @@ impl PowerSyncConnection {
             return Err(Error::TransactionCompleted(tx_id.to_string()));
         }
 
-        self.conn.execute("COMMIT", [])?;
-        tx.completed = true;
+        if tx.is_savepoint {
+            // Release savepoint
+            if let Some(ref savepoint_name) = tx.savepoint_name {
+                log::info!("[commit_transaction] Releasing savepoint: {}", savepoint_name);
+                self.conn.execute(&format!("RELEASE SAVEPOINT {}", savepoint_name), [])?;
+                log::info!("[commit_transaction] Savepoint released");
+            }
+            self.transactions.remove(tx_id);
+            self.transaction_depth = self.transaction_depth.saturating_sub(1);
+
+            // Check if there's a deferred commit that should now be executed
+            self.check_deferred_commits()?;
+        } else {
+            // Real transaction - only commit if no active savepoints
+            if self.transaction_depth == 1 {
+                log::info!("[commit_transaction] Committing real transaction");
+                self.conn.execute("COMMIT", [])?;
+                log::info!("[commit_transaction] Transaction committed");
+                self.transactions.remove(tx_id);
+                self.transaction_depth = 0;
+            } else {
+                // Mark as pending commit - will be committed when depth reaches 1
+                log::info!("[commit_transaction] Deferring commit, depth={}", self.transaction_depth);
+                tx.completed = true; // Mark as logically committed but not yet executed
+            }
+        }
+
+        log::info!("[commit_transaction] New depth={}", self.transaction_depth);
+        Ok(())
+    }
+
+    /// Rollback a transaction or savepoint
+    pub fn rollback_transaction(&mut self, tx_id: &str) -> Result<()> {
+        log::info!("[rollback_transaction] tx_id={}, depth={}", tx_id, self.transaction_depth);
+
+        let tx = self
+            .transactions
+            .get(tx_id)
+            .ok_or_else(|| Error::TransactionNotFound(tx_id.to_string()))?;
+
+        if tx.completed {
+            return Err(Error::TransactionCompleted(tx_id.to_string()));
+        }
+
+        if tx.is_savepoint {
+            // Rollback to savepoint and release it
+            if let Some(ref savepoint_name) = tx.savepoint_name {
+                log::info!("[rollback_transaction] Rolling back savepoint: {}", savepoint_name);
+                self.conn.execute(&format!("ROLLBACK TO SAVEPOINT {}", savepoint_name), [])?;
+                self.conn.execute(&format!("RELEASE SAVEPOINT {}", savepoint_name), [])?;
+                log::info!("[rollback_transaction] Savepoint rolled back");
+            }
+        } else {
+            // Rollback real transaction
+            log::info!("[rollback_transaction] Rolling back real transaction");
+            self.conn.execute("ROLLBACK", [])?;
+            log::info!("[rollback_transaction] Transaction rolled back");
+        }
+
         self.transactions.remove(tx_id);
+        self.transaction_depth = self.transaction_depth.saturating_sub(1);
+        log::info!("[rollback_transaction] New depth={}", self.transaction_depth);
+
+        // Check if there's a deferred commit that should now be executed
+        self.check_deferred_commits()?;
 
         Ok(())
     }
 
-    /// Rollback a transaction
-    pub fn rollback_transaction(&mut self, tx_id: &str) -> Result<()> {
-        let tx = self
-            .transactions
-            .get_mut(tx_id)
-            .ok_or_else(|| Error::TransactionNotFound(tx_id.to_string()))?;
+    /// Check for and execute any deferred commits when depth allows
+    fn check_deferred_commits(&mut self) -> Result<()> {
+        if self.transaction_depth == 1 {
+            // Find any transaction marked as completed (deferred commit)
+            let deferred_tx_id = self.transactions.iter()
+                .find(|(_, tx)| tx.completed && !tx.is_savepoint)
+                .map(|(id, _)| id.clone());
 
-        if tx.completed {
-            return Err(Error::TransactionCompleted(tx_id.to_string()));
+            if let Some(tx_id) = deferred_tx_id {
+                log::info!("[check_deferred_commits] Executing deferred commit for tx_id={}", tx_id);
+                self.conn.execute("COMMIT", [])?;
+                log::info!("[check_deferred_commits] Deferred commit executed");
+                self.transactions.remove(&tx_id);
+                self.transaction_depth = 0;
+            }
         }
-
-        self.conn.execute("ROLLBACK", [])?;
-        tx.completed = true;
-        self.transactions.remove(tx_id);
-
         Ok(())
     }
 
@@ -444,29 +617,6 @@ impl DatabaseManager {
     }
 }
 
-/// Convert JSON values to SQLite-compatible parameters
-fn json_to_sql_params(params: &[JsonValue]) -> Vec<rusqlite::types::Value> {
-    params
-        .iter()
-        .map(|v| match v {
-            JsonValue::Null => rusqlite::types::Value::Null,
-            JsonValue::Bool(b) => rusqlite::types::Value::Integer(if *b { 1 } else { 0 }),
-            JsonValue::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    rusqlite::types::Value::Integer(i)
-                } else if let Some(f) = n.as_f64() {
-                    rusqlite::types::Value::Real(f)
-                } else {
-                    rusqlite::types::Value::Null
-                }
-            }
-            JsonValue::String(s) => rusqlite::types::Value::Text(s.clone()),
-            JsonValue::Array(_) | JsonValue::Object(_) => {
-                rusqlite::types::Value::Text(v.to_string())
-            }
-        })
-        .collect()
-}
 
 /// Convert a SQLite row value to JSON
 fn sqlite_value_to_json(row: &rusqlite::Row, idx: usize) -> JsonValue {
@@ -487,5 +637,39 @@ fn sqlite_value_to_json(row: &rusqlite::Row, idx: usize) -> JsonValue {
             JsonValue::String(base64::engine::general_purpose::STANDARD.encode(b))
         }
         Err(_) => JsonValue::Null,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sql_param_deserialization() {
+        // Test null
+        let json = r#"{"type":"null"}"#;
+        let param: SqlParam = serde_json::from_str(json).unwrap();
+        assert!(matches!(param, SqlParam::Null));
+
+        // Test text
+        let json = r#"{"type":"text","value":"hello"}"#;
+        let param: SqlParam = serde_json::from_str(json).unwrap();
+        assert!(matches!(param, SqlParam::Text(s) if s == "hello"));
+
+        // Test int
+        let json = r#"{"type":"int","value":42}"#;
+        let param: SqlParam = serde_json::from_str(json).unwrap();
+        assert!(matches!(param, SqlParam::Int(42)));
+
+        // Test blob
+        let json = r#"{"type":"blob","value":[1,2,3]}"#;
+        let param: SqlParam = serde_json::from_str(json).unwrap();
+        assert!(matches!(param, SqlParam::Blob(b) if b == vec![1, 2, 3]));
+
+        // Test array of params
+        let json = r#"[{"type":"text","value":"schema json here"}]"#;
+        let params: Vec<SqlParam> = serde_json::from_str(json).unwrap();
+        assert_eq!(params.len(), 1);
+        assert!(matches!(&params[0], SqlParam::Text(s) if s == "schema json here"));
     }
 }

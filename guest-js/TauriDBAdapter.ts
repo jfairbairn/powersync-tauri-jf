@@ -1,4 +1,18 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke as rawInvoke } from '@tauri-apps/api/core';
+
+/**
+ * Tauri's invoke() rejects with a plain string on Rust errors.
+ * PowerSync expects Error objects (reads .name/.message/.stack).
+ * This wrapper ensures rejections are always proper Error instances.
+ */
+async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  try {
+    return await rawInvoke<T>(cmd, args);
+  } catch (e) {
+    if (e instanceof Error) throw e;
+    throw new Error(typeof e === 'string' ? e : JSON.stringify(e));
+  }
+}
 import type {
   DBAdapter,
   DBAdapterListener,
@@ -16,6 +30,63 @@ import type { ExecuteResult, QueryResult as TauriQueryResult, CrudEntry } from '
 const PS_CRUD_TABLE = 'ps_crud';
 
 /**
+ * Tagged union type for SQL parameters.
+ * This matches the Rust SqlParam enum for proper serialization.
+ */
+type SqlParam =
+  | { type: 'null' }
+  | { type: 'bool'; value: boolean }
+  | { type: 'int'; value: number }
+  | { type: 'real'; value: number }
+  | { type: 'text'; value: string }
+  | { type: 'blob'; value: number[] };
+
+/**
+ * Convert a JavaScript value to a typed SqlParam for Rust.
+ * This ensures blobs and other types are properly serialized.
+ */
+function toSqlParam(p: unknown): SqlParam {
+  if (p === null || p === undefined) {
+    return { type: 'null' };
+  }
+  if (typeof p === 'boolean') {
+    return { type: 'bool', value: p };
+  }
+  if (typeof p === 'number') {
+    // Distinguish integers from floats
+    return Number.isInteger(p)
+      ? { type: 'int', value: p }
+      : { type: 'real', value: p };
+  }
+  if (typeof p === 'string') {
+    return { type: 'text', value: p };
+  }
+  if (p instanceof Uint8Array) {
+    return { type: 'blob', value: Array.from(p) };
+  }
+  if (ArrayBuffer.isView(p)) {
+    // Handle other typed arrays
+    return { type: 'blob', value: Array.from(new Uint8Array(p.buffer, p.byteOffset, p.byteLength)) };
+  }
+  if (p instanceof ArrayBuffer) {
+    return { type: 'blob', value: Array.from(new Uint8Array(p)) };
+  }
+  // Fallback: serialize as JSON text
+  return { type: 'text', value: JSON.stringify(p) };
+}
+
+/**
+ * Convert an array of parameters to typed SqlParams.
+ */
+function toSqlParams(params: unknown[] | undefined): SqlParam[] {
+  if (!params) return [];
+  return params.map(toSqlParam);
+}
+
+// PowerSync internal table for sync operations
+const PS_OPERATIONS_TABLE = 'powersync_operations';
+
+/**
  * Extract table names from SQL statement for change notifications.
  * This is a simple parser that handles common cases.
  */
@@ -29,7 +100,7 @@ function extractTablesFromSql(sql: string): string[] {
     tables.push(table);
     // PowerSync triggers write to ps_crud when user tables are modified
     // Include ps_crud in notifications to trigger CRUD upload
-    if (!table.startsWith('ps_')) {
+    if (!table.startsWith('ps_') && table !== PS_OPERATIONS_TABLE) {
       tables.push(PS_CRUD_TABLE);
     }
   }
@@ -40,7 +111,7 @@ function extractTablesFromSql(sql: string): string[] {
     const table = updateMatch[1];
     tables.push(table);
     // PowerSync triggers write to ps_crud when user tables are modified
-    if (!table.startsWith('ps_')) {
+    if (!table.startsWith('ps_') && table !== PS_OPERATIONS_TABLE) {
       tables.push(PS_CRUD_TABLE);
     }
   }
@@ -51,12 +122,22 @@ function extractTablesFromSql(sql: string): string[] {
     const table = deleteMatch[1];
     tables.push(table);
     // PowerSync triggers write to ps_crud when user tables are modified
-    if (!table.startsWith('ps_')) {
+    if (!table.startsWith('ps_') && table !== PS_OPERATIONS_TABLE) {
       tables.push(PS_CRUD_TABLE);
     }
   }
 
   return tables;
+}
+
+/**
+ * Check if a table name is a PowerSync internal table.
+ * When these tables are modified, user tables may have been updated by the extension.
+ */
+function isPowerSyncInternalTable(tableName: string): boolean {
+  return tableName === 'powersync_operations' ||
+         tableName.startsWith('ps_') ||
+         tableName.startsWith('ps_data_');
 }
 
 /**
@@ -87,10 +168,21 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
   private closed = false;
   private pendingUpdates: Set<string> = new Set();
   private updateTimer: ReturnType<typeof setTimeout> | null = null;
+  private userTables: Set<string> = new Set();
 
   constructor(name: string) {
     super();
     this.name = name;
+  }
+
+  /**
+   * Register user table names for sync notifications.
+   * Called during schema initialization.
+   */
+  registerUserTables(tableNames: string[]): void {
+    for (const name of tableNames) {
+      this.userTables.add(name);
+    }
   }
 
   /**
@@ -155,14 +247,22 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
     const result = await invoke<ExecuteResult>('plugin:powersync-jf|execute', {
       name: this.name,
       sql,
-      params: params ?? [],
+      params: toSqlParams(params),
     });
 
-    // Notify listeners about table changes for write operations
-    // Always notify for INSERT/UPDATE/DELETE even if changes=0 (views with triggers may not report changes)
-    const tables = extractTablesFromSql(sql);
-    if (tables.length > 0) {
-      this.queueTableUpdate(tables);
+    // Detect table changes and notify listeners
+    const detectedTables = extractTablesFromSql(sql);
+
+    // Check if any PowerSync internal tables were modified
+    // If so, user tables may have been updated by the extension - notify all of them
+    const modifiedInternalTable = detectedTables.some(isPowerSyncInternalTable);
+
+    if (modifiedInternalTable && this.userTables.size > 0) {
+      // PowerSync internal operation - notify all user tables
+      this.queueTableUpdate(Array.from(this.userTables));
+    } else if (detectedTables.length > 0) {
+      // Regular write operation - notify detected tables
+      this.queueTableUpdate(detectedTables);
     }
 
     // For SELECT statements, the Rust side returns the actual rows
@@ -186,7 +286,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
     const result = await invoke<TauriQueryResult>('plugin:powersync-jf|get_all', {
       name: this.name,
       sql,
-      params: params ?? [],
+      params: toSqlParams(params),
     });
 
     // Convert row objects to arrays of values
@@ -200,7 +300,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
     const result = await invoke<TauriQueryResult>('plugin:powersync-jf|get_all', {
       name: this.name,
       sql,
-      params: params ?? [],
+      params: toSqlParams(params),
     });
 
     return result.rows as T[];
@@ -213,7 +313,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
     const result = await invoke<Record<string, unknown> | null>('plugin:powersync-jf|get_optional', {
       name: this.name,
       sql,
-      params: params ?? [],
+      params: toSqlParams(params),
     });
 
     return result as T | null;
@@ -237,7 +337,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
     const result = await invoke<ExecuteResult>('plugin:powersync-jf|execute_batch', {
       name: this.name,
       sql,
-      paramsBatch: paramsBatch ?? [],
+      paramsBatch: (paramsBatch ?? []).map(toSqlParams),
     });
 
     // Notify listeners about table changes
@@ -280,11 +380,13 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
 
   /**
    * Internal transaction implementation
+   * The Rust side handles nesting automatically via savepoints.
    */
   private async transaction<T>(
     callback: (tx: Transaction) => Promise<T>,
     isWrite: boolean
   ): Promise<T> {
+    // Always use begin_transaction - Rust side handles nesting with savepoints
     const txId = await invoke<string>('plugin:powersync-jf|begin_transaction', {
       name: this.name,
       isWrite,
@@ -301,7 +403,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
         const result = await invoke<ExecuteResult>('plugin:powersync-jf|execute', {
           name: self.name,
           sql,
-          params: params ?? [],
+          params: toSqlParams(params),
         });
 
         // Track table changes for notification after commit
@@ -329,8 +431,15 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
         const result = await invoke<TauriQueryResult>('plugin:powersync-jf|get_all', {
           name: self.name,
           sql,
-          params: params ?? [],
+          params: toSqlParams(params),
         });
+        // powersync_control() is a SELECT that internally modifies user tables.
+        // extractTablesFromSql() can't detect this, so notify all user tables.
+        if (sql.includes('powersync_control') && self.userTables.size > 0) {
+          for (const table of self.userTables) {
+            modifiedTables.add(table);
+          }
+        }
         return result.rows.map((row) => result.columns.map((col) => row[col]));
       },
 
@@ -338,7 +447,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
         const result = await invoke<TauriQueryResult>('plugin:powersync-jf|get_all', {
           name: self.name,
           sql,
-          params: params ?? [],
+          params: toSqlParams(params),
         });
         return result.rows as R[];
       },
@@ -349,7 +458,7 @@ export class TauriDBAdapter extends BaseObserver<DBAdapterListener> implements D
           {
             name: self.name,
             sql,
-            params: params ?? [],
+            params: toSqlParams(params),
           }
         );
         return result as R | null;

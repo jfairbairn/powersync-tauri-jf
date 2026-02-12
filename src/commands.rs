@@ -1,7 +1,6 @@
-use crate::database::{CrudEntry, ExecuteResult, QueryResult, RowResult};
+use crate::database::{CrudEntry, ExecuteResult, QueryResult, RowResult, SqlParam};
 use crate::error::Result;
 use crate::PowerSyncState;
-use serde_json::Value as JsonValue;
 use tauri::{command, AppHandle, Runtime, State};
 
 /// Open a database connection
@@ -33,7 +32,7 @@ pub async fn execute<R: Runtime>(
     state: State<'_, PowerSyncState>,
     name: String,
     sql: String,
-    params: Vec<JsonValue>,
+    params: Vec<SqlParam>,
 ) -> Result<ExecuteResult> {
     let manager = state.0.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
     let conn = manager.get(&name)?;
@@ -48,7 +47,7 @@ pub async fn execute_batch<R: Runtime>(
     state: State<'_, PowerSyncState>,
     name: String,
     sql: String,
-    params_batch: Vec<Vec<JsonValue>>,
+    params_batch: Vec<Vec<SqlParam>>,
 ) -> Result<ExecuteResult> {
     let manager = state.0.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
     let conn = manager.get(&name)?;
@@ -63,7 +62,7 @@ pub async fn get_all<R: Runtime>(
     state: State<'_, PowerSyncState>,
     name: String,
     sql: String,
-    params: Vec<JsonValue>,
+    params: Vec<SqlParam>,
 ) -> Result<QueryResult> {
     let manager = state.0.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
     let conn = manager.get(&name)?;
@@ -78,7 +77,7 @@ pub async fn get_optional<R: Runtime>(
     state: State<'_, PowerSyncState>,
     name: String,
     sql: String,
-    params: Vec<JsonValue>,
+    params: Vec<SqlParam>,
 ) -> Result<Option<RowResult>> {
     let manager = state.0.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
     let conn = manager.get(&name)?;

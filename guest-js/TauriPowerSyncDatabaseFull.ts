@@ -15,6 +15,7 @@ import {
 import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { TauriDBAdapter } from './TauriDBAdapter';
 import { TauriStreamingSyncImplementation } from './TauriStreamingSyncImplementation';
+import { TauriWebSocket } from './TauriWebSocket';
 
 /**
  * Options for creating a TauriPowerSyncDatabaseFull
@@ -38,73 +39,28 @@ export interface TauriPowerSyncDatabaseFullOptions {
 
 /**
  * Tauri-specific remote connector implementation.
- * Uses Tauri's HTTP plugin which bypasses CORS restrictions.
+ * Uses Tauri's HTTP plugin for fetch (bypasses CORS) and Tauri's WebSocket
+ * plugin for streaming sync (bypasses tauri://localhost origin restrictions).
  */
 class TauriRemote extends AbstractRemote {
   constructor(connector: RemoteConnector) {
-    // Wrap Tauri fetch with logging
-    const debugFetch: typeof fetch = async (input, init) => {
-      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
-      console.log('[TauriRemote] fetch:', url);
-      console.log('[TauriRemote] init:', init);
-      try {
-        const response = await tauriFetch(input, init);
-        console.log('[TauriRemote] response:', response.status, response.statusText);
-        console.log('[TauriRemote] response.body type:', response.body?.constructor?.name);
-        console.log('[TauriRemote] response.body:', response.body);
-
-        // Try to read body for debugging
-        if (url.includes('sync/stream')) {
-          console.log('[TauriRemote] response.body:', response.body);
-          console.log('[TauriRemote] response.bodyUsed:', response.bodyUsed);
-
-          try {
-            const clone = response.clone();
-            console.log('[TauriRemote] clone.body:', clone.body);
-
-            if (clone.body) {
-              const reader = clone.body.getReader();
-              console.log('[TauriRemote] got reader:', reader);
-
-              reader.read().then(({ done, value }) => {
-                console.log('[TauriRemote] first chunk - done:', done, 'length:', value?.length);
-                if (value) {
-                  const text = new TextDecoder().decode(value);
-                  console.log('[TauriRemote] chunk text:', text.substring(0, 500));
-                }
-              }).catch(e => {
-                console.error('[TauriRemote] reader.read() error:', e);
-              });
-            } else {
-              console.log('[TauriRemote] clone.body is null!');
-            }
-          } catch (e) {
-            console.error('[TauriRemote] clone/read error:', e);
-          }
-        }
-
-        return response;
-      } catch (e) {
-        console.error('[TauriRemote] fetch error:', e);
-        throw e;
-      }
-    };
-
-    // Use Tauri's HTTP client which bypasses CORS
     super(connector, undefined, {
-      socketUrlTransformer: (url: string) => {
-        // Transform http(s):// to ws(s)://
-        return url.replace(/^http/, 'ws');
-      },
-      // Use wrapped Tauri's fetch for debugging
-      fetchImplementation: debugFetch,
+      socketUrlTransformer: (url: string) => url.replace(/^http/, 'ws'),
+      fetchImplementation: tauriFetch,
     });
   }
 
   async getBSON(): Promise<typeof BSON> {
-    // Dynamically import BSON when needed
     const bson = await import('bson');
     return bson as typeof BSON;
+  }
+
+  /**
+   * Use Tauri's WebSocket plugin instead of the WebView's built-in WebSocket.
+   * The built-in WebSocket sends Origin: tauri://localhost which sync servers reject.
+   */
+  createSocket(url: string): WebSocket {
+    return new TauriWebSocket(url) as unknown as WebSocket;
   }
 }
 
@@ -148,6 +104,10 @@ export class TauriPowerSyncDatabaseFull extends AbstractPowerSyncDatabase {
   constructor(options: TauriPowerSyncDatabaseFullOptions) {
     const adapter = new TauriDBAdapter(options.database);
 
+    // Register user table names for sync notifications
+    const tableNames = options.schema.tables.map((t) => t.name);
+    adapter.registerUserTables(tableNames);
+
     const dbOptions: PowerSyncDatabaseOptionsWithDBAdapter = {
       database: adapter,
       schema: options.schema,
@@ -181,73 +141,8 @@ export class TauriPowerSyncDatabaseFull extends AbstractPowerSyncDatabase {
     throw new Error('openDBAdapter should not be called - adapter is provided directly');
   }
 
-  /**
-   * Generate the bucket storage adapter.
-   * Uses SqliteBucketStorage from @powersync/common which works with any DBAdapter.
-   */
   protected generateBucketStorageAdapter(): BucketStorageAdapter {
-    console.log('[TauriPowerSyncDatabaseFull] Creating SqliteBucketStorage with database:', this.database.name);
-    const storage = new SqliteBucketStorage(this.database, this.logger);
-
-    // Wrap methods to debug
-    const originalGetBucketStates = storage.getBucketStates.bind(storage);
-    storage.getBucketStates = async () => {
-      const result = await originalGetBucketStates();
-      console.log('[BucketStorage] getBucketStates:', result);
-      return result;
-    };
-
-    // Debug saveSyncData
-    const originalSaveSyncData = storage.saveSyncData.bind(storage);
-    storage.saveSyncData = async (batch: any) => {
-      console.log('[BucketStorage] saveSyncData called with batch:', JSON.stringify(batch).substring(0, 500));
-      try {
-        const result = await originalSaveSyncData(batch);
-        console.log('[BucketStorage] saveSyncData result:', result);
-        return result;
-      } catch (e) {
-        console.error('[BucketStorage] saveSyncData error:', e);
-        throw e;
-      }
-    };
-
-    // Debug syncLocalDatabase
-    const originalSyncLocalDatabase = storage.syncLocalDatabase.bind(storage);
-    storage.syncLocalDatabase = async (checkpoint: any) => {
-      console.log('[BucketStorage] syncLocalDatabase called with checkpoint:', checkpoint);
-      try {
-        const result = await originalSyncLocalDatabase(checkpoint);
-        console.log('[BucketStorage] syncLocalDatabase result:', result);
-        return result;
-      } catch (e) {
-        console.error('[BucketStorage] syncLocalDatabase error:', e);
-        throw e;
-      }
-    };
-
-    // Debug hasCrud
-    const originalHasCrud = storage.hasCrud.bind(storage);
-    storage.hasCrud = async () => {
-      const result = await originalHasCrud();
-      console.log('[BucketStorage] hasCrud:', result);
-      return result;
-    };
-
-    // Debug updateLocalTarget
-    const originalUpdateLocalTarget = storage.updateLocalTarget.bind(storage);
-    storage.updateLocalTarget = async (cb: any) => {
-      console.log('[BucketStorage] updateLocalTarget called');
-      try {
-        const result = await originalUpdateLocalTarget(cb);
-        console.log('[BucketStorage] updateLocalTarget result:', result);
-        return result;
-      } catch (e) {
-        console.error('[BucketStorage] updateLocalTarget error:', e);
-        throw e;
-      }
-    };
-
-    return storage;
+    return new SqliteBucketStorage(this.database, this.logger);
   }
 
   /**
@@ -258,9 +153,10 @@ export class TauriPowerSyncDatabaseFull extends AbstractPowerSyncDatabase {
     connector: PowerSyncBackendConnector,
     options: CreateSyncImplementationOptions & RequiredAdditionalConnectionOptions
   ): StreamingSyncImplementation {
+    const remote = new TauriRemote(connector);
     return new TauriStreamingSyncImplementation({
       adapter: this.bucketStorageAdapter,
-      remote: new TauriRemote(connector),
+      remote,
       uploadCrud: async () => {
         await connector.uploadData(this);
       },
