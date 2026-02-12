@@ -71,12 +71,29 @@ pub struct PowerSyncConnection {
 
 impl PowerSyncConnection {
     /// Open a new PowerSync database connection
+    #[allow(unused_variables)]
     pub fn open(name: &str, app_data_dir: &PathBuf, resource_dir: Option<&PathBuf>) -> Result<Self> {
         let db_path = app_data_dir.join(format!("{}.db", name));
 
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
+        }
+
+        // On iOS, register the statically linked extension before opening any connection.
+        // sqlite3_auto_extension makes it load automatically for all new connections.
+        #[cfg(powersync_static)]
+        {
+            static INIT: std::sync::Once = std::sync::Once::new();
+            INIT.call_once(|| {
+                unsafe extern "C" {
+                    fn powersync_init_static() -> std::ffi::c_int;
+                }
+                let rc = unsafe { powersync_init_static() };
+                if rc != 0 {
+                    log::error!("powersync_init_static() failed: {}", rc);
+                }
+            });
         }
 
         let conn = Connection::open_with_flags(
@@ -90,48 +107,50 @@ impl PowerSyncConnection {
         // Enable WAL mode for better concurrent access
         conn.execute_batch("PRAGMA journal_mode=WAL;")?;
 
-        // Try to load the PowerSync extension
-        // First try the build-time path (for development), then the resource directory (for bundled apps)
         let mut powersync_loaded = false;
 
-        // Try build-time path first (set by build.rs during compilation)
-        if let Some(build_path) = extension::get_build_time_extension_path() {
-            if build_path.exists() {
-                match extension::load_extension(&conn, &build_path) {
-                    Ok(()) => {
-                        log::info!("Loaded PowerSync extension from build path: {:?}", build_path);
-                        powersync_loaded = true;
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to load PowerSync extension from build path: {}", e);
-                    }
-                }
-            }
-        }
-
-        // Fall back to resource directory (for bundled apps)
-        if !powersync_loaded {
-            if let Some(res_dir) = resource_dir {
-                match extension::find_extension(res_dir) {
-                    Ok(ext_path) => {
-                        match extension::load_extension(&conn, &ext_path) {
-                            Ok(()) => {
-                                log::info!("Loaded PowerSync extension from {:?}", ext_path);
-                                powersync_loaded = true;
-                            }
-                            Err(e) => {
-                                log::warn!("Failed to load PowerSync extension: {}", e);
-                            }
+        // On non-iOS: try dynamic extension loading
+        #[cfg(not(powersync_static))]
+        {
+            // Try build-time path first (set by build.rs during compilation)
+            if let Some(build_path) = extension::get_build_time_extension_path() {
+                if build_path.exists() {
+                    match extension::load_extension(&conn, &build_path) {
+                        Ok(()) => {
+                            log::info!("Loaded PowerSync extension from build path: {:?}", build_path);
+                            powersync_loaded = true;
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to load PowerSync extension from build path: {}", e);
                         }
                     }
-                    Err(e) => {
-                        log::debug!("PowerSync extension not found: {}", e);
+                }
+            }
+
+            // Fall back to resource directory (for bundled apps)
+            if !powersync_loaded {
+                if let Some(res_dir) = resource_dir {
+                    match extension::find_extension(res_dir) {
+                        Ok(ext_path) => {
+                            match extension::load_extension(&conn, &ext_path) {
+                                Ok(()) => {
+                                    log::info!("Loaded PowerSync extension from {:?}", ext_path);
+                                    powersync_loaded = true;
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to load PowerSync extension: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::debug!("PowerSync extension not found: {}", e);
+                        }
                     }
                 }
             }
         }
 
-        // Initialize PowerSync if available (either from extension or linked statically)
+        // Check if PowerSync is available (from auto_extension on iOS, or dynamic load above)
         if !powersync_loaded {
             powersync_loaded = extension::has_powersync(&conn);
         }

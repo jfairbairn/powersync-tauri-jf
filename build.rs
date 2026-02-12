@@ -21,13 +21,20 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
-    // Build the PowerSync loadable extension
+    // Register custom cfg so rustc doesn't warn about it
+    println!("cargo:rustc-check-cfg=cfg(powersync_static)");
+
+    // Build the PowerSync extension (static on iOS, loadable on desktop)
     build_powersync_extension();
 
     tauri_plugin::Builder::new(COMMANDS).build();
 }
 
-/// Build the PowerSync SQLite extension as a loadable module
+/// Build the PowerSync SQLite extension.
+///
+/// On iOS, builds as a static library and links it directly (since iOS
+/// doesn't allow dynamic extension loading). On other platforms, builds
+/// as a loadable module (.dylib/.so/.dll).
 fn build_powersync_extension() {
     use std::env;
     use std::path::PathBuf;
@@ -35,6 +42,9 @@ fn build_powersync_extension() {
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let target = env::var("TARGET").unwrap();
+
+    let is_ios = target.contains("apple-ios");
 
     // Check for submodule first (development/submodule setup)
     let submodule_dir = manifest_dir.join("deps/powersync-sqlite-core");
@@ -89,14 +99,73 @@ fn build_powersync_extension() {
     let target_dir = out_dir.join("powersync-ext");
     std::fs::create_dir_all(&target_dir).ok();
 
-    // Determine the target triple
-    let target = env::var("TARGET").unwrap();
+    if is_ios {
+        build_static_extension(&core_dir, &target_dir, &out_dir, &target);
+    } else {
+        build_loadable_extension(&core_dir, &target_dir, &out_dir);
+    }
 
-    // Build the loadable extension
-    println!("cargo:warning=Building PowerSync extension for target: {}", target);
+    // Tell cargo to rerun if the core source changes
+    println!("cargo:rerun-if-changed={}", core_dir.join("crates").display());
+}
+
+/// Build as a static library for iOS and link it directly.
+fn build_static_extension(core_dir: &std::path::Path, target_dir: &std::path::Path, out_dir: &std::path::Path, target: &str) {
+    use std::process::Command;
+
+    println!("cargo:warning=Building PowerSync STATIC extension for iOS target: {}", target);
 
     let status = Command::new("cargo")
-        .current_dir(&core_dir)
+        .current_dir(core_dir)
+        .args([
+            "build",
+            "--release",
+            "-p", "powersync_static",
+            "--target", target,
+            "--target-dir", target_dir.to_str().unwrap(),
+        ])
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {
+            println!("cargo:warning=PowerSync static extension built successfully");
+
+            // The static lib is at target/<target>/release/libpowersync.a
+            let lib_dir = target_dir.join(target).join("release");
+            let built_lib = lib_dir.join("libpowersync.a");
+
+            if built_lib.exists() {
+                // Copy to out_dir so we can reference it
+                let dest = out_dir.join("libpowersync.a");
+                std::fs::copy(&built_lib, &dest).ok();
+
+                // Tell cargo to link the static library
+                println!("cargo:rustc-link-search=native={}", out_dir.display());
+                println!("cargo:rustc-link-lib=static=powersync");
+
+                // Tell the code to use static init instead of load_extension
+                println!("cargo:rustc-cfg=powersync_static");
+            } else {
+                println!("cargo:warning=Static lib not found at {:?}", built_lib);
+            }
+        }
+        Ok(s) => {
+            println!("cargo:warning=Failed to build PowerSync static extension: exit code {:?}", s.code());
+        }
+        Err(e) => {
+            println!("cargo:warning=Failed to run cargo for PowerSync static extension: {}", e);
+        }
+    }
+}
+
+/// Build as a loadable extension (.dylib/.so/.dll) for desktop.
+fn build_loadable_extension(core_dir: &std::path::Path, target_dir: &std::path::Path, out_dir: &std::path::Path) {
+    use std::process::Command;
+
+    println!("cargo:warning=Building PowerSync loadable extension");
+
+    let status = Command::new("cargo")
+        .current_dir(core_dir)
         .args([
             "build",
             "--release",
@@ -109,7 +178,6 @@ fn build_powersync_extension() {
         Ok(s) if s.success() => {
             println!("cargo:warning=PowerSync extension built successfully");
 
-            // Copy the built extension to the output directory
             let ext_name = if cfg!(target_os = "macos") {
                 "libpowersync.dylib"
             } else if cfg!(target_os = "windows") {
@@ -124,7 +192,6 @@ fn build_powersync_extension() {
             if built_ext.exists() {
                 std::fs::copy(&built_ext, &dest_ext).ok();
                 println!("cargo:warning=Extension copied to {:?}", dest_ext);
-                // Pass the extension path to the compiled code
                 println!("cargo:rustc-env=POWERSYNC_EXT_PATH={}", dest_ext.display());
             }
         }
@@ -135,7 +202,4 @@ fn build_powersync_extension() {
             println!("cargo:warning=Failed to run cargo for PowerSync extension: {}", e);
         }
     }
-
-    // Tell cargo to rerun if the core source changes
-    println!("cargo:rerun-if-changed={}", core_dir.join("crates").display());
 }

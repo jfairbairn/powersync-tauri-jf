@@ -3,15 +3,20 @@
 //! This module handles locating and loading the PowerSync SQLite extension
 //! from the application's resources directory.
 
-use crate::error::{Error, Result};
+use crate::error::Result;
+#[cfg(not(powersync_static))]
+use crate::error::Error;
+#[cfg(not(powersync_static))]
 use std::path::PathBuf;
 
 /// Get the extension path from build time (set by build.rs)
+#[cfg(not(powersync_static))]
 pub fn get_build_time_extension_path() -> Option<PathBuf> {
     option_env!("POWERSYNC_EXT_PATH").map(PathBuf::from)
 }
 
 /// Get the extension filename for the current platform
+#[cfg(not(powersync_static))]
 pub fn get_extension_filename() -> &'static str {
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
@@ -28,6 +33,7 @@ pub fn get_extension_filename() -> &'static str {
 }
 
 /// Find the PowerSync extension in the given resource directory
+#[cfg(not(powersync_static))]
 pub fn find_extension(resource_dir: &PathBuf) -> Result<PathBuf> {
     let filename = get_extension_filename();
 
@@ -55,6 +61,7 @@ pub fn find_extension(resource_dir: &PathBuf) -> Result<PathBuf> {
     )))
 }
 
+#[cfg(not(powersync_static))]
 /// Load the PowerSync extension into a SQLite connection
 ///
 /// # Safety
