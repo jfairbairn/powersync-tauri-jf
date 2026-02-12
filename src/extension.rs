@@ -13,7 +13,7 @@ pub fn get_build_time_extension_path() -> Option<PathBuf> {
 
 /// Get the extension filename for the current platform
 pub fn get_extension_filename() -> &'static str {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
     {
         "libpowersync.dylib"
     }
