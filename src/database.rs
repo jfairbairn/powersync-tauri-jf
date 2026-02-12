@@ -156,25 +156,6 @@ impl PowerSyncConnection {
     /// and the results will be returned in the `rows` field.
     /// This is needed because PowerSync extension functions use SELECT to return values.
     pub fn execute(&mut self, sql: &str, params: &[SqlParam]) -> Result<ExecuteResult> {
-        log::info!("[execute] SQL: {}", sql);
-        log::info!("[execute] Params count: {}", params.len());
-        for (i, p) in params.iter().enumerate() {
-            match p {
-                SqlParam::Text(s) => {
-                    log::info!("[execute] Param {}: Text(len={})", i, s.len());
-                    if s.len() < 200 {
-                        log::info!("[execute] Param {} value: {}", i, s);
-                    } else {
-                        log::info!("[execute] Param {} value (first 100): {}...", i, &s[..100]);
-                    }
-                },
-                SqlParam::Blob(b) => log::info!("[execute] Param {}: Blob(len={})", i, b.len()),
-                SqlParam::Int(n) => log::info!("[execute] Param {}: Int({})", i, n),
-                SqlParam::Real(n) => log::info!("[execute] Param {}: Real({})", i, n),
-                SqlParam::Bool(b) => log::info!("[execute] Param {}: Bool({})", i, b),
-                SqlParam::Null => log::info!("[execute] Param {}: Null", i),
-            }
-        }
         let params = sql_params_to_values(params);
         let sql_upper = sql.trim_start().to_uppercase();
 
@@ -296,12 +277,9 @@ impl PowerSyncConnection {
     pub fn begin_transaction(&mut self, is_write: bool) -> Result<String> {
         let tx_id = Uuid::new_v4().to_string();
 
-        log::info!("[begin_transaction] depth={}, is_write={}, tx_id={}", self.transaction_depth, is_write, tx_id);
-
         if self.transaction_depth > 0 {
             // Already in a transaction, use savepoint for nesting
             let savepoint_name = format!("sp_{}", tx_id.replace("-", ""));
-            log::info!("[begin_transaction] Creating savepoint: {}", savepoint_name);
             self.conn.execute(&format!("SAVEPOINT {}", savepoint_name), [])?;
 
             self.transactions.insert(
@@ -311,10 +289,9 @@ impl PowerSyncConnection {
                     is_write,
                     completed: false,
                     is_savepoint: true,
-                    savepoint_name: Some(savepoint_name.clone()),
+                    savepoint_name: Some(savepoint_name),
                 },
             );
-            log::info!("[begin_transaction] Savepoint created: {}", savepoint_name);
         } else {
             // Start a real transaction
             let sql = if is_write {
@@ -323,7 +300,6 @@ impl PowerSyncConnection {
                 "BEGIN"
             };
 
-            log::info!("[begin_transaction] Starting real transaction: {}", sql);
             self.conn.execute(sql, [])?;
 
             self.transactions.insert(
@@ -336,18 +312,14 @@ impl PowerSyncConnection {
                     savepoint_name: None,
                 },
             );
-            log::info!("[begin_transaction] Real transaction started");
         }
 
         self.transaction_depth += 1;
-        log::info!("[begin_transaction] New depth={}", self.transaction_depth);
         Ok(tx_id)
     }
 
     /// Commit a transaction or release savepoint
     pub fn commit_transaction(&mut self, tx_id: &str) -> Result<()> {
-        log::info!("[commit_transaction] tx_id={}, depth={}", tx_id, self.transaction_depth);
-
         let tx = self
             .transactions
             .get_mut(tx_id)
@@ -360,9 +332,7 @@ impl PowerSyncConnection {
         if tx.is_savepoint {
             // Release savepoint
             if let Some(ref savepoint_name) = tx.savepoint_name {
-                log::info!("[commit_transaction] Releasing savepoint: {}", savepoint_name);
                 self.conn.execute(&format!("RELEASE SAVEPOINT {}", savepoint_name), [])?;
-                log::info!("[commit_transaction] Savepoint released");
             }
             self.transactions.remove(tx_id);
             self.transaction_depth = self.transaction_depth.saturating_sub(1);
@@ -372,26 +342,20 @@ impl PowerSyncConnection {
         } else {
             // Real transaction - only commit if no active savepoints
             if self.transaction_depth == 1 {
-                log::info!("[commit_transaction] Committing real transaction");
                 self.conn.execute("COMMIT", [])?;
-                log::info!("[commit_transaction] Transaction committed");
                 self.transactions.remove(tx_id);
                 self.transaction_depth = 0;
             } else {
                 // Mark as pending commit - will be committed when depth reaches 1
-                log::info!("[commit_transaction] Deferring commit, depth={}", self.transaction_depth);
-                tx.completed = true; // Mark as logically committed but not yet executed
+                tx.completed = true;
             }
         }
 
-        log::info!("[commit_transaction] New depth={}", self.transaction_depth);
         Ok(())
     }
 
     /// Rollback a transaction or savepoint
     pub fn rollback_transaction(&mut self, tx_id: &str) -> Result<()> {
-        log::info!("[rollback_transaction] tx_id={}, depth={}", tx_id, self.transaction_depth);
-
         let tx = self
             .transactions
             .get(tx_id)
@@ -404,21 +368,15 @@ impl PowerSyncConnection {
         if tx.is_savepoint {
             // Rollback to savepoint and release it
             if let Some(ref savepoint_name) = tx.savepoint_name {
-                log::info!("[rollback_transaction] Rolling back savepoint: {}", savepoint_name);
                 self.conn.execute(&format!("ROLLBACK TO SAVEPOINT {}", savepoint_name), [])?;
                 self.conn.execute(&format!("RELEASE SAVEPOINT {}", savepoint_name), [])?;
-                log::info!("[rollback_transaction] Savepoint rolled back");
             }
         } else {
-            // Rollback real transaction
-            log::info!("[rollback_transaction] Rolling back real transaction");
             self.conn.execute("ROLLBACK", [])?;
-            log::info!("[rollback_transaction] Transaction rolled back");
         }
 
         self.transactions.remove(tx_id);
         self.transaction_depth = self.transaction_depth.saturating_sub(1);
-        log::info!("[rollback_transaction] New depth={}", self.transaction_depth);
 
         // Check if there's a deferred commit that should now be executed
         self.check_deferred_commits()?;
@@ -429,15 +387,12 @@ impl PowerSyncConnection {
     /// Check for and execute any deferred commits when depth allows
     fn check_deferred_commits(&mut self) -> Result<()> {
         if self.transaction_depth == 1 {
-            // Find any transaction marked as completed (deferred commit)
             let deferred_tx_id = self.transactions.iter()
                 .find(|(_, tx)| tx.completed && !tx.is_savepoint)
                 .map(|(id, _)| id.clone());
 
             if let Some(tx_id) = deferred_tx_id {
-                log::info!("[check_deferred_commits] Executing deferred commit for tx_id={}", tx_id);
                 self.conn.execute("COMMIT", [])?;
-                log::info!("[check_deferred_commits] Deferred commit executed");
                 self.transactions.remove(&tx_id);
                 self.transaction_depth = 0;
             }
