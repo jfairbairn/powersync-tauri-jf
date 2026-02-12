@@ -1,7 +1,18 @@
 use crate::database::{CrudEntry, ExecuteResult, QueryResult, RowResult, SqlParam};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::PowerSyncState;
 use tauri::{command, AppHandle, Runtime, State};
+
+/// Reject SQL statements that reference powersync_core internals.
+/// Checked against the prepared statement template only, not bound parameter values.
+fn validate_sql(sql: &str) -> Result<()> {
+    if sql.contains("powersync_core") {
+        return Err(Error::ForbiddenSql(
+            "SQL must not reference powersync_core".to_string(),
+        ));
+    }
+    Ok(())
+}
 
 /// Open a database connection
 #[command]
@@ -34,6 +45,7 @@ pub async fn execute<R: Runtime>(
     sql: String,
     params: Vec<SqlParam>,
 ) -> Result<ExecuteResult> {
+    validate_sql(&sql)?;
     let manager = state.0.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
     let conn = manager.get(&name)?;
     let mut conn = conn.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
@@ -49,6 +61,7 @@ pub async fn execute_batch<R: Runtime>(
     sql: String,
     params_batch: Vec<Vec<SqlParam>>,
 ) -> Result<ExecuteResult> {
+    validate_sql(&sql)?;
     let manager = state.0.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
     let conn = manager.get(&name)?;
     let mut conn = conn.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
@@ -64,6 +77,7 @@ pub async fn get_all<R: Runtime>(
     sql: String,
     params: Vec<SqlParam>,
 ) -> Result<QueryResult> {
+    validate_sql(&sql)?;
     let manager = state.0.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
     let conn = manager.get(&name)?;
     let conn = conn.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
@@ -79,6 +93,7 @@ pub async fn get_optional<R: Runtime>(
     sql: String,
     params: Vec<SqlParam>,
 ) -> Result<Option<RowResult>> {
+    validate_sql(&sql)?;
     let manager = state.0.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;
     let conn = manager.get(&name)?;
     let conn = conn.lock().map_err(|e| crate::error::Error::Lock(e.to_string()))?;

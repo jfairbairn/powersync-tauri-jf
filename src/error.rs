@@ -36,6 +36,9 @@ pub enum Error {
 
     #[error("PowerSync not initialized")]
     PowerSyncNotInitialized,
+
+    #[error("Forbidden SQL: {0}")]
+    ForbiddenSql(String),
 }
 
 impl Serialize for Error {
